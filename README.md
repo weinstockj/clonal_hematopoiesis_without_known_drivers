@@ -5,6 +5,8 @@ The structure of this repo is that it contains an R [targets](https://books.rope
 
 This repo contains torch code [torch](https://torch.mlverse.org/) code for training the GEM model within the tidymodels ecosystem. 
 
+Please note that `R/data.R` currently contains a few hardcoded paths. 
+
 ## Environment details
 You can reproduce the R environment using [Renv](https://rstudio.github.io/renv/) and the provided lock file. 
 
