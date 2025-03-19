@@ -1,14 +1,14 @@
-PYTHON = "/net/fantasia/home/jweinstk/anaconda3/bin/python3.7"
-reticulate::use_python(PYTHON)
-reticulate::use_condaenv("cyvcf2")
-reticulate::source_python("python/parse.py")
+# PYTHON = "/net/fantasia/home/jweinstk/anaconda3/bin/python3.7"
+# reticulate::use_python(PYTHON)
+# reticulate::use_condaenv("cyvcf2")
+# reticulate::source_python("python/parse.py")
 
 get_path = function(label) {
     paths = c(
         "bcf" = "/net/topmed2/working/gt-release/exchange-area/freeze.10b/sites/freeze.10b.chr21.pass_and_fail.sites.bcf",
         "somatic" =  "/net/topmed2/working/jweinstk/count_singletons/singletons_spark_2021_05_25.parquet",
-        "training_vcf" = file.path("output", "vcf", "training_vcf_2022_08_29.vcf")
-        
+        "training_vcf" = file.path("output", "vcf", "training_vcf_2022_08_29.vcf"),
+        "ancestry" = "/net/topmed2/working/gt-release/exchange-area/freeze.8.autosome.local.ancestry/freeze.8.global.ancestry.txt"
     )
 
     path = paths[label]
@@ -352,16 +352,32 @@ join_chromatin = function(training, cd34) {
 }
 
 read_in_mCAs = function() {
+
     df = vroom::vroom("/net/topmed2/working/jweinstk/count_singletons/mCA_calls/TOPMed_mCA_calls.txt") %>%
         dplyr::rename(NWD_ID = sample_id)
+
+    return(df)
+}
+
+read_in_LOY = function() {
+
+    df = vroom::vroom("/net/topmed2/working/jweinstk/count_singletons/mCA_calls/LoY_phenotypes_v4.txt") %>%
+        dplyr::rename(NWD_ID = NWDID)
+
     return(df)
 }
 
 read_in_mCA_manifest = function() {
-    samples = vroom::vroom("/net/topmed2/working/jweinstk/count_singletons/mCA_calls/samples.inFinal.Analyses.txt", delim = "\t") %>%
-        dplyr::rename(NWD_ID = NWDID)
 
     mCA_calls = read_in_mCAs()
+
+    mCA_samples = readLines("/net/topmed2/working/jweinstk/count_singletons/mCA_calls/samples.inFinal.Analyses.txt")
+
+    LOY_calls = read_in_LOY()
+
+    LOY_samples = LOY_calls %>% dplyr::pull(NWD_ID)
+
+    stopifnot(length(setdiff(LOY_samples, mCA_samples)) == 0)
 
     loss_of_X = mCA_calls %>%
         dplyr::filter(chrom == "chrX")
@@ -369,11 +385,18 @@ read_in_mCA_manifest = function() {
     exclude_loss_of_X = mCA_calls %>%
         dplyr::filter(chrom != "chrX")
 
-    df = samples %>%
+    loss_of_Y = LOY_calls %>%
+        dplyr::filter(loy == 1)
+
+    df = tibble::tibble(
+                NWD_ID = mCA_samples
+            ) %>%
             dplyr::mutate(
                 autosomal_mCA = NWD_ID %in% exclude_loss_of_X$NWD_ID,
                 LOX = NWD_ID %in% loss_of_X$NWD_ID,
-                any_mCA = LOX | autosomal_mCA
+                any_mCA_LOX = LOX | autosomal_mCA,
+                LOY = NWD_ID %in% loss_of_Y$NWD_ID,
+                any_mCA_LOX_LOY = any_mCA_LOX | LOY
             )
 
     return(df)
@@ -488,21 +511,30 @@ write_encore_output = function(sample_meta, predictions) {
     return(fnames)
 
 }
-write_semi_supervised_encore_output = function(sample_meta, fitted_model, torch_input, mCA) {
+write_semi_supervised_encore_output = function(sample_meta, fitted_model, torch_input, mCA, global_ancestry) {
 
-    date = "2022_12_28"
+    date = "2025_3_13"
+    prefix = "semi_supervised"
 
     fnames = c(
-        "tsv_all" = file.path(encore_input(), glue::glue("semi_supervised_output_{date}.tsv")),
-        "tsv_female" = file.path(encore_input(), glue::glue("semi_supervised_female_output_{date}.tsv")),
-        "tsv_male" = file.path(encore_input(), glue::glue("semi_supervised_male_output_{date}.tsv")),
-        "tsv_exclude_LOX" = file.path(encore_input(), glue::glue("semi_supervised_exclude_LOX_output_{date}.tsv")),
-        "tsv_only_LOX" = file.path(encore_input(), glue::glue("semi_supervised_only_LOX_output_{date}.tsv")),
-        "tsv_exclude_autosomal_mCA" = file.path(encore_input(), glue::glue("semi_supervised_exclude_autosomal_mCA_output_{date}.tsv")),
-        "tsv_only_autosomal_mCA" = file.path(encore_input(), glue::glue("semi_supervised_only_autosomal_mCA_output_{date}.tsv")),
-        "tsv_exclude_any_mCA" = file.path(encore_input(),glue::glue("semi_supervised_exclude_any_mCA_output_{date}.tsv")),
-        "tsv_only_any_mCA" = file.path(encore_input(),glue::glue("semi_supervised_only_any_mCA_output_{date}.tsv")),
-        "plot" = file.path(figure_dir(), "scatter_semisupervised.png")
+        "tsv_all" = file.path(encore_input(), glue::glue("{prefix}_output_{date}.tsv")),
+        "tsv_female" = file.path(encore_input(), glue::glue("{prefix}_female_output_{date}.tsv")),
+        "tsv_male" = file.path(encore_input(), glue::glue("{prefix}_male_output_{date}.tsv")),
+        "tsv_exclude_LOX" = file.path(encore_input(), glue::glue("{prefix}_exclude_LOX_output_{date}.tsv")),
+        "tsv_exclude_LOY" = file.path(encore_input(), glue::glue("{prefix}_exclude_LOY_output_{date}.tsv")),
+        "tsv_contains_LOX" = file.path(encore_input(), glue::glue("{prefix}_contains_LOX_output_{date}.tsv")),
+        "tsv_contains_LOY" = file.path(encore_input(), glue::glue("{prefix}_contains_LOY_output_{date}.tsv")),
+        "tsv_exclude_autosomal_mCA" = file.path(encore_input(), glue::glue("{prefix}_exclude_autosomal_mCA_output_{date}.tsv")),
+        "tsv_contains_autosomal_mCA" = file.path(encore_input(), glue::glue("{prefix}_contains_autosomal_mCA_output_{date}.tsv")),
+        # "tsv_exclude_any_mCA_LOX" = file.path(encore_input(),glue::glue("{prefix}_exclude_any_mCA_LOX_output_{date}.tsv")),
+        # "tsv_contains_any_mCA" = file.path(encore_input(),glue::glue("{prefix}_contains_any_mCA_output_{date}.tsv")),
+        "tsv_contains_any_mCA_LOX_LOY" = file.path(encore_input(),glue::glue("{prefix}_contains_any_mCA_LOX_LOY_output_{date}.tsv")),
+        "tsv_exclude_any_mCA_LOX_LOY" = file.path(encore_input(),glue::glue("{prefix}_exclude_any_mCA_LOX_LOY_output_{date}.tsv")),
+        "tsv_EUR" = file.path(encore_input(), glue::glue("{prefix}_only_EUR_{date}.tsv")),
+        "tsv_AFR" = file.path(encore_input(), glue::glue("{prefix}_only_AFR_{date}.tsv")),
+        "tsv_EAS" = file.path(encore_input(), glue::glue("{prefix}_only_EAS_{date}.tsv")),
+        "tsv_AMR" = file.path(encore_input(), glue::glue("{prefix}_only_AMR_{date}.tsv")),
+        "plot" = file.path(figure_dir(), glue::glue("scatter_{prefix}_{date}.png"))
     )
 
     estimated_counts = purrr::imap_dfr(
@@ -533,43 +565,111 @@ write_semi_supervised_encore_output = function(sample_meta, fitted_model, torch_
         readr::write_tsv(fnames["tsv_male"])
 
     sample_meta %>%
-        dplyr::filter(!is.na(any_mCA)) %>%
+        dplyr::filter(!is.na(any_mCA_LOX_LOY)) %>%
         dplyr::filter(LOX) %>%
-        readr::write_tsv(fnames["tsv_only_LOX"])
+        readr::write_tsv(fnames["tsv_contains_LOX"])
 
     sample_meta %>%
-        dplyr::filter(!is.na(any_mCA)) %>%
+        dplyr::filter(!is.na(any_mCA_LOX_LOY)) %>%
+        dplyr::filter(LOY) %>%
+        readr::write_tsv(fnames["tsv_contains_LOY"])
+
+    sample_meta %>%
+        dplyr::filter(!is.na(any_mCA_LOX_LOY)) %>%
         dplyr::filter(!LOX) %>%
         readr::write_tsv(fnames["tsv_exclude_LOX"])
 
     sample_meta %>%
-        dplyr::filter(!is.na(any_mCA)) %>%
-        dplyr::filter(autosomal_mCA) %>%
-        readr::write_tsv(fnames["tsv_only_autosomal_mCA"])
+        dplyr::filter(!is.na(any_mCA_LOX_LOY)) %>%
+        dplyr::filter(!LOY) %>%
+        readr::write_tsv(fnames["tsv_exclude_LOY"])
 
     sample_meta %>%
-        dplyr::filter(!is.na(any_mCA)) %>%
+        dplyr::filter(!is.na(any_mCA_LOX_LOY)) %>%
+        dplyr::filter(autosomal_mCA) %>%
+        readr::write_tsv(fnames["tsv_contains_autosomal_mCA"])
+
+    sample_meta %>%
+        dplyr::filter(!is.na(any_mCA_LOX_LOY)) %>%
         dplyr::filter(!autosomal_mCA) %>%
         readr::write_tsv(fnames["tsv_exclude_autosomal_mCA"])
 
     sample_meta %>%
-        dplyr::filter(!is.na(any_mCA)) %>%
-        dplyr::filter(any_mCA) %>%
-        readr::write_tsv(fnames["tsv_only_any_mCA"])
+        dplyr::filter(!is.na(any_mCA_LOX_LOY)) %>%
+        dplyr::filter(any_mCA_LOX_LOY) %>%
+        readr::write_tsv(fnames["tsv_contains_any_mCA_LOX_LOY"])
 
     sample_meta %>%
-        dplyr::filter(!is.na(any_mCA)) %>%
-        dplyr::filter(!any_mCA) %>%
-        readr::write_tsv(fnames["tsv_exclude_any_mCA"])
+        dplyr::filter(!is.na(any_mCA_LOX_LOY)) %>%
+        dplyr::filter(!any_mCA_LOX_LOY) %>%
+        readr::write_tsv(fnames["tsv_exclude_any_mCA_LOX_LOY"])
+
+    logger::log_info("Now here 1")
+
+    sample_meta %>%
+        dplyr::inner_join(global_ancestry, by = "NWD_ID") %>%
+        dplyr::filter(ancestry == "europe") %>%
+        readr::write_tsv(fnames["tsv_EUR"])
+
+    sample_meta %>%
+        dplyr::inner_join(global_ancestry, by = "NWD_ID") %>%
+        dplyr::filter(ancestry == "sub-saharan africa") %>%
+        readr::write_tsv(fnames["tsv_AFR"])
+
+    sample_meta %>%
+        dplyr::inner_join(global_ancestry, by = "NWD_ID") %>%
+        dplyr::filter(ancestry == "east asia") %>%
+        readr::write_tsv(fnames["tsv_EAS"])
+
+    sample_meta %>%
+        dplyr::inner_join(global_ancestry, by = "NWD_ID") %>%
+        dplyr::filter(ancestry == "native america") %>%
+        readr::write_tsv(fnames["tsv_AMR"])
 
     ggsave(
         fnames["plot"],
-        create_scatter_color(sample_meta, estimated_counts, observed_counts),
+        create_scatter_color(
+                sample_meta, 
+                estimated_counts, 
+                observed_counts
+        ),
         width = 6, height = 4, units = "in"
     )
 
     return(fnames)
-
 }
 
+read_in_ancestry = function() {
+    
+    path = get_path("ancestry")
 
+    global_ancestry = data.table::fread(path) %>% 
+        as.data.frame %>%
+        setNames(
+            c('NWD_ID',
+              'sub-saharan africa',
+              'central and south asia', 
+              'east asia', 
+              'europe', 
+              'native america', 
+              'oceania', 
+              'middle east', 
+              'pi', 
+              'stage'
+            )
+        ) %>%
+    as_tibble %>%
+    dplyr::select(-pi, -stage)
+
+    global_ancestry_labels = global_ancestry %>% 
+        tidyr::gather(ancestry, proportion, -NWD_ID) %>%
+        dplyr::group_by(NWD_ID) %>%
+        dplyr::filter(proportion == max(proportion)) %>%
+        dplyr::ungroup(.) %>%
+        dplyr::select(
+            NWD_ID,
+            ancestry
+        )
+
+    return(global_ancestry_labels)
+}

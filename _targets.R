@@ -32,12 +32,14 @@ list(
   tar_target(
     name = control_variants,
     command = read_in_control_variants(),
-    format = "parquet"
+    format = "parquet",
+    cue = tar_cue(mode = "never"),
   ),
   tar_target(
     name = somatic_variants,
     command = read_in_somatic_variants(),
-    format = "parquet"
+    format = "parquet",
+    cue = tar_cue(mode = "never"),
   ),
   tar_target(
     name = common_dups,
@@ -60,7 +62,8 @@ list(
             "dups" = common_dups
         )
     ),
-    format = "parquet"
+    format = "parquet",
+    cue = tar_cue(mode = "never"),
   ),
   tar_target(
     name = filter_to_high_mappability,
@@ -70,12 +73,14 @@ list(
             "umap" = umap
         )
     ),
-    format = "parquet"
+    format = "parquet",
+    cue = tar_cue(mode = "never"),
   ),
   tar_target(
     name = somatic_variants_filtered,
     command = prune_somatic_variants_by_sample_list_and_vaf(filter_to_high_mappability),
-    format = "parquet"
+    format = "parquet",
+    cue = tar_cue(mode = "never"),
   ),
   # tar_target(
   #   name = sample_control_variants,
@@ -90,42 +95,50 @@ list(
   tar_target(
     name = training_sample,
     command = dplyr::bind_rows(control_variants, somatic_variants_filtered),
-    format = "parquet"
+    format = "parquet",
+    cue = tar_cue(mode = "never"),
   ),
   tar_target(
     name = write_to_vcf_,
     command = write_to_vcf(training_sample),
+    cue = tar_cue(mode = "never"),
     format = "file"
   ),
   tar_target(
     name = execute_vep_,
     command = execute_vep(write_to_vcf_),
+    cue = tar_cue(mode = "never"),
     format = "file"
   ),
   tar_target(
     name = training_annotated,
     command = read_in_training_annotated(execute_vep_, training_sample),
+    cue = tar_cue(mode = "never"),
     format = "parquet"
   ),
   tar_target(name = cd34, command = read_in_cd34()),
   tar_target(
     name = annotate_chromatin,
+    cue = tar_cue(mode = "never"),
     command = join_chromatin(training_annotated, cd34)
   ),
   tar_target(
     name = annotate_chromatin_sequence,
     command = attach_sequence_context(annotate_chromatin),
+    cue = tar_cue(mode = "never"),
     format = "parquet"
   ),
   tar_target(
     name = imputed_training,
     command = impute_and_transform(annotate_chromatin_sequence),
+    cue = tar_cue(mode = "never"),
     format = "parquet"
   ),
   tar_target(
     name = train_model,
     command = create_recipe_and_bake(imputed_training),
     format = "qs",
+    cue = tar_cue(mode = "never"),
     resources = tar_resources(
         qs = tar_resources_qs(preset = "balanced")
     )
@@ -133,6 +146,7 @@ list(
   tar_target(
     name = training_with_predictions,
     command = predict_training_future(train_model, imputed_training, somatic_variants_filtered),
+    cue = tar_cue(mode = "never"),
     format = "parquet"
   ),
   tar_target(
@@ -180,18 +194,28 @@ list(
   tar_target(
     name = encore_input,
     command = write_encore_output(sample_meta, training_with_predictions),
+    cue = tar_cue(mode = "never"),
     format = "file"
   ),
   tar_target(
     name = torch_input,
     command = create_data_for_torch(train_model, imputed_training, somatic_variants_filtered, sample_meta),
     format = "qs",
+    cue = tar_cue(mode = "never"),
+    resources = tar_resources(
+        qs = tar_resources_qs(preset = "balanced")
+    )
+  ),
+  tar_target(
+    name = create_plots_by_annotation_,
+    command = create_plots_by_annotation(imputed_training, somatic_variants_filtered, sample_meta),
     resources = tar_resources(
         qs = tar_resources_qs(preset = "balanced")
     )
   ),
   tar_target(
     name = fitted_model,
+    cue = tar_cue(mode = "never"),
     command = torch_model(
         torch_input$x[, torch_predictors()], 
         torch_input$y,
@@ -213,8 +237,14 @@ list(
     format = "parquet"
   ),
   tar_target(
+    name = global_ancestry,
+    command = read_in_ancestry(),
+    format = "parquet"
+  ),
+  tar_target(
     name = write_encore_input_semi_supervised_,
-    command = write_semi_supervised_encore_output(sample_meta, fitted_model, torch_input, mCA_manifest),
+    command = write_semi_supervised_encore_output(sample_meta, fitted_model, torch_input, mCA_manifest, global_ancestry),
+    # cue = tar_cue(mode = "never"),
     format = "file"
   )
 )

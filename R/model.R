@@ -550,8 +550,6 @@ torch_model = function(x, y, sample_map, lr = 0.1, iters = 180, num_threads = 20
     stopifnot(ncol(x) == length(torch_predictors()))
     stopifnot(length(sample_map) == length(y))
 
-    logger::log_info("here 1")
-
     ids = sample(1:length(y), size = size, replace = FALSE)
     all_nwds = names(sample_map)
     nwds = all_nwds[ids]
@@ -699,4 +697,102 @@ plot_fitted_model_beta = function(fitted_model) {
         )
 
     ggsave(fname, plot, width = 6, height = 4, units = "in")
+}
+
+create_plots_by_annotation = function(training, variants, samples) {
+
+    variant_meta = variants %>%
+        dplyr::select(ID, NWD_ID) %>%
+        dplyr::inner_join(
+            samples %>%
+                dplyr::select(NWD_ID, age),
+            by = "NWD_ID"
+        ) %>%
+        dtplyr::lazy_dt(key_by = "ID")
+
+    new_data = training %>% 
+        dplyr::mutate(SOMATIC = as.integer(SOMATIC)) %>% 
+        dplyr::filter(FILTER == "somatic") %>%
+        dtplyr::lazy_dt(key_by = "ID")
+
+    logger::log_info("sorting sample meta and variant meta data")
+    # sort variants
+    new_data = dplyr::inner_join(new_data, variant_meta, by = "ID") %>%
+        dplyr::arrange(ID)
+
+    plot = new_data %>%
+        group_by(NWD_ID, MUT_TYPE) %>%
+        dplyr::summarize(
+            n = n(),
+            age = first(age)
+        ) %>%
+        dplyr::ungroup(.) %>%
+        dplyr::group_by(MUT_TYPE) %>%
+        dplyr::summarize(
+            cor = cor(age, n, method = "spearman")
+        ) %>%
+        dplyr::collect(.) %>%
+        dplyr::mutate(
+            label = forcats::fct_reorder(factor(MUT_TYPE), cor, .desc = TRUE)
+        ) %>%
+        ggplot(data = ., aes(x = label, y = cor)) +
+            geom_col() +
+            cowplot::theme_cowplot(font_size = 12) +
+            labs(x = "Mutation type", y = "Spearman correlation with age")
+
+    ggsave(file.path(figure_dir(), "mutation_type_with_age_spearman.png"), plot, width = 6, height = 4, units = "in", bg = "white")
+    ggsave(file.path(figure_dir(), "mutation_type_with_age_spearman.pdf"), plot, width = 6, height = 4, units = "in", bg = "white")
+
+    plot = new_data %>%
+        dplyr::mutate(
+
+            # row$VAF = (a - .37) / .23
+            VAF = .23 * VAF + 0.37, # undo previous transformation
+            VAF_bin = cut(VAF, breaks = 5),
+        ) %>%
+        group_by(NWD_ID, VAF_bin) %>%
+        dplyr::summarize(
+            n = n(),
+            age = first(age)
+        ) %>%
+        dplyr::ungroup(.) %>%
+        dplyr::group_by(VAF_bin) %>%
+        dplyr::summarize(
+            cor = cor(age, n, method = "spearman")
+        ) %>%
+        dplyr::collect(.) %>%
+        dplyr::mutate(
+            label = forcats::fct_reorder(factor(VAF_bin), cor, .desc = TRUE)
+        ) %>%
+        ggplot(data = ., aes(x = label, y = cor)) +
+            geom_col() +
+            cowplot::theme_cowplot(font_size = 12) +
+            labs(x = "Variant allele fraction", y = "Spearman correlation with age")
+
+    ggsave(file.path(figure_dir(), "VAF_with_age_spearman.png"), plot, width = 6, height = 4, units = "in", bg = "white")
+    ggsave(file.path(figure_dir(), "VAF_with_age_spearman.pdf"), plot, width = 6, height = 4, units = "in", bg = "white")
+
+    plot = new_data %>%
+        group_by(NWD_ID, SOMATIC) %>%
+        dplyr::summarize(
+            n = n(),
+            age = first(age)
+        ) %>%
+        dplyr::ungroup(.) %>%
+        dplyr::group_by(SOMATIC) %>%
+        dplyr::summarize(
+            cor = cor(age, n, method = "spearman")
+        ) %>%
+        dplyr::collect(.) %>%
+        dplyr::mutate(
+            label = ifelse(SOMATIC == 1, "somatic", "germline"),
+            label = forcats::fct_reorder(factor(label), cor, .desc = TRUE)
+        ) %>%
+        ggplot(data = ., aes(x = label, y = cor)) +
+            geom_col() +
+            cowplot::theme_cowplot(font_size = 12) +
+            labs(x = "VEP somatic annotation", y = "Spearman correlation with age")
+
+    ggsave(file.path(figure_dir(), "somatic_vep_with_age_spearman.png"), plot, width = 6, height = 4, units = "in", bg = "white")
+    ggsave(file.path(figure_dir(), "somatic_vep_with_age_spearman.pdf"), plot, width = 6, height = 4, units = "in", bg = "white")
 }
