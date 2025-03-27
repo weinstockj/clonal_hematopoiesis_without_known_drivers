@@ -684,19 +684,28 @@ torch_model = function(x, y, sample_map, lr = 0.1, iters = 180, num_threads = 20
 
 plot_fitted_model_beta = function(fitted_model) {
 
-    fname = file.path(figure_dir(), "semisupervised_model_betas.png")
 
-    coefs = tibble::enframe(fitted_model$beta)
+    coefs = tibble::enframe(fitted_model$beta) %>%
+        dplyr::mutate(
+            name = stringr::str_remove_all(name, "MUT_TYPE_"),
+            name = stringr::str_replace_all(name, "state_", "State: "),
+            name = stringr::str_replace_all(name, "_", " "),
+            name = stringr::str_replace_all(name, "\\.", "→")
+        )
     
     plot = ggplot(data = coefs, aes(y = forcats::fct_reorder(name, value, .desc = TRUE), x = value)) +
         geom_col() +
         cowplot::theme_cowplot(font_size = 12) +
-        labs(x = "beta") + 
+        labs(x = "GEM beta") + 
         theme(
             axis.title.y = element_blank()
         )
 
-    ggsave(fname, plot, width = 6, height = 4, units = "in")
+    fname = file.path(figure_dir(), "semi_supervised_model_betas.png")
+    ggsave(fname, plot, width = 6, height = 5, units = "in", bg = "white")
+
+    fname = file.path(figure_dir(), "semi_supervised_model_betas.pdf")
+    ggsave(fname, plot, dpi = 300, width = 6, height = 5, units = "in", bg = "white")
 }
 
 create_plots_by_annotation = function(training, variants, samples) {
